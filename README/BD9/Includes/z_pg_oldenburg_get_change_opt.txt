@@ -1,0 +1,147 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_CHANGE
+*&---------------------------------------------------------------------*
+
+*VERKBELEG
+*FAKTBELEG
+*LIEFERUNG
+*BELEG
+
+"extract change events for delivery and faktura
+CALL FUNCTION 'CHANGEDOCUMENT_READ'
+  EXPORTING
+*   archive_handle             = ld_archive_handle
+*   changenumber               = ld_changenumber
+*   date_of_change             = ld_date_of_change
+    objectclass                = 'LIEFERUNG'
+*   objectid                   = ld_objectid
+*   tablekey                   = ld_tablekey
+*   tablename                  = ld_tablename
+*   time_of_change             = ld_time_of_change
+*   username                   = ld_username
+*   local_time                 = ld_local_time
+*   time_zone                  = ld_time_zone
+*   tablekey254                = ld_tablekey254
+*   keyguid                    = ld_keyguid
+*   date_until                 = ld_date_until
+*   time_until                 = ld_time_until
+*   keyguid_str                = ld_keyguid_str
+*   read_changedocu            = ld_read_changedocu
+  IMPORTING
+    et_cdred_str               = ld_et_cdred_str
+  TABLES
+    editpos                    = it_editpos_delivery
+  EXCEPTIONS
+    no_position_found          = 1
+    wrong_access_to_archive    = 2
+    time_zone_conversion_error = 3
+  .  "  CHANGEDOCUMENT_READ
+
+"extract change events for delivery and faktura
+CALL FUNCTION 'CHANGEDOCUMENT_READ'
+  EXPORTING
+*   archive_handle             = ld_archive_handle
+*   changenumber               = ld_changenumber
+*   date_of_change             = ld_date_of_change
+    objectclass                = 'FAKTBELEG'
+*   objectid                   = ld_objectid
+*   tablekey                   = ld_tablekey
+*   tablename                  = ld_tablename
+*   time_of_change             = ld_time_of_change
+*   username                   = ld_username
+*   local_time                 = ld_local_time
+*   time_zone                  = ld_time_zone
+*   tablekey254                = ld_tablekey254
+*   keyguid                    = ld_keyguid
+*   date_until                 = ld_date_until
+*   time_until                 = ld_time_until
+*   keyguid_str                = ld_keyguid_str
+*   read_changedocu            = ld_read_changedocu
+  IMPORTING
+    et_cdred_str               = ld_et_cdred_str
+  TABLES
+    editpos                    = it_editpos_faktura
+  EXCEPTIONS
+    no_position_found          = 1
+    wrong_access_to_archive    = 2
+    time_zone_conversion_error = 3
+  .  "  CHANGEDOCUMENT_READ
+
+
+
+
+
+*TYPES: BEGIN OF ty_objektclass,
+*         ld_objectclass TYPE cdhdr-objectclas,
+*
+*       END OF ty_objektclass.
+*
+*DATA:
+*ld_et_cdred_str    TYPE CDRED_STR_TAB ,
+*it_editpos    TYPE STANDARD TABLE OF CDRED,"TABLES PARAM
+*wa_editpos    LIKE LINE OF it_editpos ,
+*  it_objectclass TYPE STANDARD TABLE OF ty_objektclass WITH HEADER LINE,
+*  wa_objectclass LIKE LINE OF it_objectclass.
+*
+*wa_objectclass = 'VERKBELEG'.
+*INSERT wa_objectclass INTO TABLE it_objectclass.
+*wa_objectclass ='FAKTBELEG'.
+*INSERT wa_objectclass INTO TABLE it_objectclass.
+*wa_objectclass = 'LIEFERUNG'.
+*INSERT wa_objectclass INTO TABLE it_objectclass.
+*wa_objectclass = 'BELEG'.
+*INSERT wa_objectclass INTO TABLE it_objectclass.
+*
+**APPEND VALUE #((ld_objectclass = 'VERKBELEG')
+**(ld_objectclass = 'FAKTBELEG')
+**(ld_objectclass = 'LIEFERUNG')
+**(ld_objectclass = 'BELEG')) to it_objectclass.
+*
+*
+*
+*LOOP AT it_objectclass.
+*  CALL FUNCTION 'CHANGEDOCUMENT_READ'
+*  EXPORTING
+**   archive_handle =             ld_archive_handle
+**   changenumber =               ld_changenumber
+**   date_of_change =             ld_date_of_change
+*    objectclass =                it_objectclass-ld_objectclass
+**   objectid =                   ld_objectid
+**   tablekey =                   ld_tablekey
+**   tablename =                  ld_tablename
+**   time_of_change =             ld_time_of_change
+**   username =                   ld_username
+**   local_time =                 ld_local_time
+**   time_zone =                  ld_time_zone
+**   tablekey254 =                ld_tablekey254
+**   keyguid =                    ld_keyguid
+**   date_until =                 ld_date_until
+**   time_until =                 ld_time_until
+**   keyguid_str =                ld_keyguid_str
+**   read_changedocu =            ld_read_changedocu
+*  IMPORTING
+*    et_cdred_str =               ld_et_cdred_str
+*  TABLES
+*    editpos =                    it_editpos
+*  EXCEPTIONS
+*    NO_POSITION_FOUND =          1
+*    WRONG_ACCESS_TO_ARCHIVE =    2
+*    TIME_ZONE_CONVERSION_ERROR =    3
+*    .  "  CHANGEDOCUMENT_READ
+*
+*if it_editpos-OBJECTID eq
+*  cl_demo_output=>display( it_editpos ).
+*  LOOP AT it_i_cdhdr.
+*    CLEAR wa_evlog.
+*    wa_evlog-id = it_sales_orders-plant && '-' && it_salesordern && '-' && it_sales_orders-itm_number.
+*    wa_evlog-activity_name = 'create delivery'.
+*    wa_evlog-timestamp = it_et_delivery_header-erdat && it_et_delivery_header-erzet.
+*    wa_evlog-type_of_delivery = it_et_delivery_header-lfart.
+*    wa_evlog-goods_recipient = it_et_delivery_header-kunnr.
+*    wa_evlog-wight = it_et_delivery_header-ntgew.
+*    wa_evlog-net_worth = it_et_delivery_header-netwr.
+*    IF wa_evlog-timestamp NE '00000000000000'.
+*      INSERT wa_evlog INTO TABLE it_evlog.
+*    ENDIF.
+*  ENDLOOP.
+*ENDLOOP.

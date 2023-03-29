@@ -1,0 +1,244 @@
+REPORT z_pg_oldenburg_evlog_j45_opt.
+
+"Struktur für den Eventlog
+TYPES: BEGIN OF t_evlog,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+       END OF t_evlog.
+
+"Struktur für den Attributlog der Purchaseorder
+TYPES: BEGIN OF t_evlog_po,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+         h_created_by      TYPE ernam,
+         h_vendor          TYPE elifn,
+         h_dscnt1_to       TYPE dzbdet,
+         h_dscnt2_to       TYPE dzbdet,
+         h_dscnt3_to       TYPE dzbdet,
+         h_dsct_pct1       TYPE dzbd1p,
+         h_dsct_pct2       TYPE dzbd2p,
+
+         h_purch_org       TYPE ekorg,
+         h_quotation       TYPE angnr,
+         h_suppl_vend      TYPE llief, "Warenlieferant
+         h_customer        TYPE kunnr, "Debitorennummer
+         h_shiptype        TYPE versart, "Versandart
+         "h_doc_date        TYPE EBDAT,
+         "s_delivery_date   TYPE eeind,
+*         s_quantity        TYPE etmen,
+*         s_com_qty         TYPE mng06, "Bestätigte Menge
+         m_quantity        TYPE bstmg,
+         m_material        TYPE matnr18,
+         m_plant           TYPE ewerk,
+         m_stge_loc        TYPE lgort_d, "Lagerort
+         m_net_price       TYPE bapicurext,
+         m_qual_insp       TYPE insmk,
+         h_delivery_date   TYPE eeind,
+         h_tabkey          TYPE cdtabkey,
+         f_old             TYPE cdfldvalo,
+         f_new             TYPE cdfldvaln,
+       END OF t_evlog_po.
+
+"Struktur für den Attributlog des Goodsmovement
+TYPES: BEGIN OF t_evlog_gm,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+         g_material        TYPE matnr18,
+         g_plant           TYPE werks_d,
+         g_stge_loc        TYPE lgort_d,
+         g_batch           TYPE charg_d,
+         g_move_type       TYPE bwart,
+         g_stck_type       TYPE mb_insmk,
+         g_vendor          TYPE elifn, "Kontonummer des Lieferanden
+         g_customer        TYPE ekunn, "Kontonummer des Kunden
+         g_entry_qnt       TYPE erfmg, "Menge in Erfassungsmengeneinheit
+         g_entry_uom       TYPE erfme, "Erfassungsmeneinheit
+         g_shipping        TYPE evers, "Versandvorschrift
+         g_comp_ship       TYPE evere, "Einhaltung der Versandvorschrift
+         g_gr_rcpt         TYPE wempf, "Warenempfänger
+         g_unload_pt       TYPE ablad, "Abladestelle
+         g_costcenter      TYPE kostl, "Kostenstelle
+         g_asset_no        TYPE anln1, "anlagenhauptnummer
+         g_sub_number      TYPE anln2, "Anlagenunternummer
+         g_move_mat        TYPE ummat18, "Empfangendes/Abgebendes Material
+         g_move_plant      TYPE umwrk, "Empfangendes/Abgebendes Werkg_MOVE_REAS
+         g_move_reas       TYPE mb_grbew, "Grund der Bewegung
+         g_acttype         TYPE lstar, "Leistungsart
+         g_suppl_vend      TYPE llief, "Warenlieferart
+         g_func_area_long  TYPE fkber, "Funktionsbereich
+         f_old             TYPE cdfldvalo,
+         f_new             TYPE cdfldvaln,
+         mblnr             TYPE mblnr,
+       END OF t_evlog_gm.
+
+"Struktur für den Attributlog des Invoice
+TYPES: BEGIN OF t_evlog_i,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+         mblnr             TYPE mblnr,
+         i_doc_type        TYPE blart, "Belegart
+         i_username        TYPE usnam, "Username
+         i_comp_code       TYPE bukrs, "Buchungskreis
+         i_currency        TYPE waers, "Währungsschlüssel
+         i_gross_amnt      TYPE bapi_rmwwr, "Rechnungsbruttobetrag in Belegwährung
+         i_calc_tax_ind    TYPE xmwst, "steuer automatisch rechnen
+         i_pmnttrms        TYPE dzterm, "Zahlungsbediningsschlüssel
+         i_dsct_days1      TYPE dzbd1t, "Skonto Tage 1
+         i_dsct_days2      TYPE dzbd2t, "Skonto Tage 2
+         i_netterms        TYPE dzbd3t, "Frist für Nettokonditionen
+         i_discnt          TYPE bapiwskto, "skontobetrag in Belegwährung
+         i_reversal_doc    TYPE stblg, "Belegnummer des Stornobelges
+         i_vend_error      TYPE bapi_lieffn, "Lieferantenfheler exklusive MwSt
+         i_pymt_meth       TYPE dzlsch, "Zahlweg
+         i_pmtmthsupl      TYPE uzawe, "Zusatz zum Zahlweg
+         i_invoice_status  TYPE rbstat, "rechnungsbelegstatus
+         i_supcountry      TYPE landl, "Lieferland
+         i_payee_payer     TYPE empfb, "Zahlungsempfänger / Regulierer
+         i_partner_bk      TYPE bvtyp, "Partnerbanktyp
+         i_bus_area        TYPE gsber, "Geschäftsbereich
+         i_fisc_year       TYPE gjahr, "Geschäftsjahr
+         f_old             TYPE cdfldvalo,
+         f_new             TYPE cdfldvaln,
+
+       END OF t_evlog_i.
+
+"Struktur für Mapping Tabelle
+TYPES: BEGIN OF t_pohistory,
+         po_id   TYPE ekko-ebeln,
+         mat_doc TYPE mblnr,
+       END OF t_pohistory.
+
+"Struktur für BAPI aufruf für BAPI_INCOMINGINVOICE_GETDETAIL
+TYPES: BEGIN OF t_inv,
+         belnr TYPE re_belnr,
+         gjahr TYPE gjahr,
+       END OF t_inv.
+
+"Struktur für BAPI aufruf für BAPI_GOODSMVT_GETDETAIL
+TYPES: BEGIN OF t_goods,
+         mblnr TYPE mblnr,
+         mjahr TYPE mjahr,
+       END OF t_goods.
+
+
+
+
+
+"Hier werden interne Tabellen und Arbeitsbereiche für das Programm erstellt
+DATA:
+  it_evlog        TYPE STANDARD TABLE OF t_evlog INITIAL SIZE 0,
+  wa_evlog        LIKE LINE OF it_evlog,
+  it_evlog_po     TYPE STANDARD TABLE OF t_evlog_po INITIAL SIZE 0,
+  wa_evlog_po     LIKE LINE OF it_evlog_po,
+  it_evlog_gm     TYPE STANDARD TABLE OF t_evlog_gm INITIAL SIZE 0,
+  wa_evlog_gm     LIKE LINE OF it_evlog_gm,
+  it_evlog_i      TYPE STANDARD TABLE OF t_evlog_i INITIAL SIZE 0,
+  wa_evlog_i      LIKE LINE OF it_evlog_i,
+
+  go_it_pohistory TYPE STANDARD TABLE OF t_pohistory INITIAL SIZE 0,
+  go_wa_pohistory LIKE LINE OF go_it_pohistory,
+  go_it_inv       TYPE STANDARD TABLE OF t_inv INITIAL SIZE 0,
+  go_wa_inv       LIKE LINE OF go_it_inv,
+  go_it_goods     TYPE STANDARD TABLE OF t_goods INITIAL SIZE 0,
+  go_wa_goods     LIKE LINE OF go_it_goods,
+  m1              TYPE i,
+  m2              TYPE i.
+
+"interne Tabellen für den Aufruf der BAPIs werden befüllt
+SELECT belnr, gjahr FROM rbkp INTO TABLE @go_it_inv.
+SELECT mblnr, mjahr FROM mkpf INTO TABLE @go_it_goods.
+
+"INCLUDE z_smss_pg_direct_dl.
+
+START-OF-SELECTION.
+  "Aufruf des Includes z_pg_oldenburg_get_b_opt
+  GET RUN TIME FIELD m1.
+  INCLUDE z_pg_oldenburg_get_b_opt.
+*  INCLUDE z_pg_oldenburg_get_b.
+  GET RUN TIME FIELD m2.
+
+  m2 = m2 - m1.
+  m2 = m2 / 1000000.
+  WRITE: / 'b', m2, 'seconds'.
+
+  "Aufruf des Includes z_pg_oldenburg_get_g_opt
+  GET RUN TIME FIELD m1.
+  INCLUDE z_pg_oldenburg_get_g_opt.
+  GET RUN TIME FIELD m2.
+
+  m2 = m2 - m1.
+  m2 = m2 / 1000000.
+  WRITE: / 'g', m2, 'seconds'.
+
+  "Aufruf des Includes z_pg_oldenburg_get_invoice_opt
+  GET RUN TIME FIELD m1.
+  INCLUDE z_pg_oldenburg_get_invoice_opt.
+  GET RUN TIME FIELD m2.
+
+  m2 = m2 - m1.
+  m2 = m2 / 1000000.
+  WRITE: / 'i', m2, 'seconds'.
+
+"Aufruf des Includes z_pg_oldenburg_get_payment_opt
+*  GET RUN TIME FIELD m1.
+*  INCLUDE z_pg_oldenburg_get_payment_opt.
+*
+*  GET RUN TIME FIELD m2.
+*
+*  m2 = m2 - m1.
+*  m2 = m2 / 1000000.
+*  WRITE: / 'i', m2, 'seconds'.
+
+  DATA test TYPE string.
+
+
+
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send = it_evlog
+      process_name  = 'J45'
+      is_event_log  = 'Y'
+    IMPORTING
+      message       = test.
+
+  WRITE:/ test.
+
+
+
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send   = it_evlog_po
+      process_name    = 'J45'
+      is_event_log    = 'N'
+      business_object = 'Purchase_order'
+    IMPORTING
+      message         = test.
+
+  WRITE:/ test.
+
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send   = it_evlog_gm
+      process_name    = 'J45'
+      is_event_log    = 'N'
+      business_object = 'Goods_movement'
+    IMPORTING
+      message         = test.
+
+  WRITE:/ test.
+
+
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send   = it_evlog_i
+      process_name    = 'J45'
+      is_event_log    = 'N'
+      business_object = 'Invoice'
+    IMPORTING
+      message         = test.
+
+  WRITE:/ test.

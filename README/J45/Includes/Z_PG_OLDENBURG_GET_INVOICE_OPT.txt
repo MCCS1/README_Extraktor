@@ -1,0 +1,134 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_INVOICE
+*&---------------------------------------------------------------------*
+
+"Deklaration der internen Tabellen und Arbeitsbereiche, welche für das Include benötigt werden
+DATA:
+  ld_headerdata	      TYPE bapi_incinv_detail_header,
+  ld_addressdata      TYPE bapi_incinv_detail_addressdata,
+  it_itemdata	        TYPE STANDARD TABLE OF bapi_incinv_detail_item, "TABLES PARAM
+  wa_itemdata	        LIKE LINE OF it_itemdata,
+  it_return_i	        TYPE STANDARD TABLE OF bapiret2, "TABLES PARAM
+  wa_return	          LIKE LINE OF it_return_i,
+
+  it_editpos_inv      TYPE STANDARD TABLE OF cdred WITH HEADER LINE,
+  ld_cdred_objectid   TYPE cdred-objectid,
+  ld_et_cdred_str_inv TYPE cdred_str_tab.
+
+.
+
+
+
+
+LOOP AT go_it_inv INTO go_wa_inv.
+  CLEAR ld_headerdata.
+  CLEAR ld_addressdata.
+  CLEAR it_itemdata[].
+  CLEAR it_return_i[].
+  CALL FUNCTION 'BAPI_INCOMINGINVOICE_GETDETAIL'
+    EXPORTING
+      invoicedocnumber = go_wa_inv-belnr
+      fiscalyear       = go_wa_inv-gjahr
+    IMPORTING
+      headerdata       = ld_headerdata
+      addressdata      = ld_addressdata
+    TABLES
+      itemdata         = it_itemdata
+      return           = it_return_i
+    .  "  BAPI_INCOMINGINVOICE_GETDETAIL
+
+  IF sy-subrc EQ 0.
+
+    SELECT SINGLE po_id AS id
+      FROM @go_it_pohistory AS history
+      WHERE mat_doc = @go_wa_inv-belnr
+      INTO @DATA(wa_history).
+    "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+    CLEAR wa_evlog_i.
+    wa_evlog_i-id = wa_history.
+    wa_evlog_i-activity_name = 'create invoice'.
+    wa_evlog_i-timestamp = ld_headerdata-entry_date && ld_headerdata-entry_time.
+    wa_evlog_i-mblnr = ld_headerdata-inv_doc_no.
+
+    wa_evlog_i-i_doc_type = ld_headerdata-doc_type.
+    wa_evlog_i-i_username = ld_headerdata-username.
+    wa_evlog_i-i_comp_code = ld_headerdata-comp_code.
+    wa_evlog_i-i_currency = ld_headerdata-currency.
+    wa_evlog_i-i_gross_amnt = ld_headerdata-gross_amnt.
+    wa_evlog_i-i_calc_tax_ind = ld_headerdata-calc_tax_ind.
+    wa_evlog_i-i_pmnttrms = ld_headerdata-pmnttrms.
+    wa_evlog_i-i_dsct_days1 = ld_headerdata-dsct_days1.
+    wa_evlog_i-i_dsct_days2 = ld_headerdata-dsct_days2.
+    wa_evlog_i-i_netterms = ld_headerdata-netterms.
+    wa_evlog_i-i_discnt = ld_headerdata-discnt.
+    wa_evlog_i-i_reversal_doc = ld_headerdata-reversal_doc.
+    wa_evlog_i-i_vend_error = ld_headerdata-vend_error.
+    wa_evlog_i-i_pymt_meth = ld_headerdata-pymt_meth.
+    wa_evlog_i-i_pmtmthsupl = ld_headerdata-pmtmthsupl.
+    wa_evlog_i-i_invoice_status = ld_headerdata-invoice_status.
+    wa_evlog_i-i_supcountry = ld_headerdata-supcountry.
+    wa_evlog_i-i_payee_payer = ld_headerdata-payee_payer.
+    wa_evlog_i-i_partner_bk = ld_headerdata-partner_bk.
+    wa_evlog_i-i_bus_area = ld_headerdata-bus_area.
+    wa_evlog_i-i_fisc_year = ld_headerdata-fisc_year.
+
+    IF wa_evlog_i-timestamp NE '00000000000000'.
+      "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+      INSERT wa_evlog_i INTO TABLE it_evlog_i.
+    ENDIF.
+
+    CLEAR ld_cdred_objectid.
+    ld_cdred_objectid = go_wa_inv-belnr && go_wa_inv-gjahr.
+    CLEAR ld_et_cdred_str_inv.
+    CLEAR it_editpos_inv[].
+    "Aufruf des Funktionsbausteins CHANGEDOCUMENT_READ um die Events mit den Änderungen an den Business Objekten zu erhalten
+    CALL FUNCTION 'CHANGEDOCUMENT_READ'
+      EXPORTING
+        objectclass                = 'INCOMINGINVOICE'
+        objectid                   = ld_cdred_objectid
+      IMPORTING
+        et_cdred_str               = ld_et_cdred_str_inv
+      TABLES
+        editpos                    = it_editpos_inv
+      EXCEPTIONS
+        no_position_found          = 1
+        wrong_access_to_archive    = 2
+        time_zone_conversion_error = 3
+      .  "  CHANGEDOCUMENT_READ
+
+    LOOP AT it_editpos_inv.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      CLEAR wa_evlog_i.
+      wa_evlog_i-id = wa_history.
+      CASE it_editpos_inv-chngind.
+        WHEN 'D'.
+          wa_evlog_i-activity_name = 'delete invoice'.
+        WHEN 'I' OR 'J'.
+          wa_evlog_i-activity_name = 'insert invoice'.
+        WHEN 'U'.
+          wa_evlog_i-f_new = it_editpos_inv-f_new.
+          wa_evlog_i-f_old = it_editpos_inv-f_old.
+          CASE it_editpos_inv-fname.
+            WHEN 'ZTERM'.
+              wa_evlog_i-activity_name = 'change terms of payment'.
+            WHEN 'ZLSCH'.
+              wa_evlog_i-activity_name = 'change payment method'.
+            WHEN 'SPGRQ'.
+              wa_evlog_i-activity_name = 'invoice locked'.
+            WHEN OTHERS.
+              wa_evlog_i-activity_name = 'update invoice'.
+          ENDCASE.
+        WHEN 'E'.
+          wa_evlog_i-activity_name = 'partly delete invoice'.
+        WHEN OTHERS.
+          wa_evlog_i-activity_name = 'unknown change invoice'.
+      ENDCASE.
+      wa_evlog_i-timestamp = it_editpos_inv-udate && it_editpos_inv-utime.
+
+      IF wa_evlog_i-timestamp NE '00000000000000'.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_i INTO TABLE it_evlog_i.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+ENDLOOP.

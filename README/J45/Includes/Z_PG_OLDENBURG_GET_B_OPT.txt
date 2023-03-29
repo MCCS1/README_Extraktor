@@ -1,0 +1,326 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_B
+*&---------------------------------------------------------------------*
+* Bestellung
+
+"Deklaration der internen Tabellen und Arbeitsbereiche, welche für das Include benötigt werden
+DATA: lv_bapimepoheader    TYPE bapimepoheader,
+      it_return_b          TYPE STANDARD TABLE OF bapiret2 WITH HEADER LINE,
+      it_poitem            TYPE STANDARD TABLE OF bapimepoitem,
+      it_poschedule        TYPE STANDARD TABLE OF bapimeposchedule WITH HEADER LINE,
+      wa_poschedule        LIKE LINE OF it_poschedule,
+      it_poaccount         TYPE STANDARD TABLE OF bapimepoaccount WITH HEADER LINE,
+      it_poservices        TYPE STANDARD TABLE OF bapiesllc WITH HEADER LINE,
+      it_posrvaccessvalues TYPE STANDARD TABLE OF bapiesklc WITH HEADER LINE,
+      it_ekko_ebeln        TYPE STANDARD TABLE OF ekko-ebeln WITH HEADER LINE,
+      it_editpos_po        TYPE STANDARD TABLE OF cdred WITH HEADER LINE,
+      ld_et_cdred_str      TYPE cdred_str_tab,
+      ld_ekko_ebeln_cdred  TYPE cdred-objectid,
+      it_pohistory         TYPE STANDARD TABLE OF bapiekbe WITH HEADER LINE,
+      l_offset             TYPE string,
+      l_last5              TYPE ebelp.
+
+"Hier werden alle Einkaufsbelegnummern für den Aufruf der BAPI in ein einterne Tablle gespeichert
+SELECT ebeln FROM ekko INTO TABLE it_ekko_ebeln.
+
+
+LOOP AT it_ekko_ebeln.
+
+  CLEAR lv_bapimepoheader.
+  CLEAR it_return_b[].
+  CLEAR it_poschedule[].
+  CLEAR it_pohistory[].
+  CALL FUNCTION 'BAPI_PO_GETDETAIL1'
+    EXPORTING
+      purchaseorder = it_ekko_ebeln
+    IMPORTING
+      poheader      = lv_bapimepoheader
+    TABLES
+      return        = it_return_b
+      poitem        = it_poitem
+      poschedule    = it_poschedule
+      pohistory     = it_pohistory.
+
+  IF sy-subrc EQ 0.
+    "Hier werden die Belegnummer des Einkaufsbelegs mit den Nummer des Materialbelegs, für die Zuordnung in dem Include Z_PG_OLDENBURG_INVOICE_OPT, verknüpft
+    LOOP AT it_pohistory WHERE hist_type = 'Q'.
+      CLEAR go_wa_pohistory.
+      go_wa_pohistory-po_id = it_ekko_ebeln.
+      go_wa_pohistory-mat_doc = it_pohistory-mat_doc.
+      INSERT  go_wa_pohistory INTO TABLE  go_it_pohistory.
+    ENDLOOP.
+
+
+    "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+    LOOP AT it_poschedule INTO wa_poschedule.
+      IF wa_poschedule-po_date && '000000' NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'create order'.
+        wa_evlog_po-timestamp = wa_poschedule-po_date && '000000'.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        IF wa_poschedule-delivery_date IS NOT INITIAL.
+          wa_evlog_po-h_delivery_date = wa_poschedule-delivery_date.
+        ELSE.
+          wa_evlog_po-h_delivery_date = '01/01/1900'.
+        ENDIF.
+
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-ms_date && wa_poschedule-ms_time NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'material provision'.
+        wa_evlog_po-timestamp = wa_poschedule-ms_date && wa_poschedule-ms_time.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-load_date && wa_poschedule-load_time NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'material load'.
+        wa_evlog_po-timestamp = wa_poschedule-load_date && wa_poschedule-load_time.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-tp_date && wa_poschedule-tp_time NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'transport planning'.
+        wa_evlog_po-timestamp = wa_poschedule-tp_date && wa_poschedule-tp_time.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-gi_date && wa_poschedule-gi_time NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'outgoing goods'.
+        wa_evlog_po-timestamp = wa_poschedule-gi_date && wa_poschedule-gi_time.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-gr_end_date && wa_poschedule-gr_end_time NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'end of goods receipt'.
+        wa_evlog_po-timestamp = wa_poschedule-gr_end_date && wa_poschedule-gr_end_time.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      IF wa_poschedule-handoverdate && wa_poschedule-handovertime NE '00000000000000'.
+        CLEAR wa_evlog_po.
+        "wa_evlog_po-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+        wa_evlog_po-id = it_ekko_ebeln.
+        wa_evlog_po-activity_name = 'delivery of goods on the spot'.
+        wa_evlog_po-timestamp = wa_poschedule-handoverdate && wa_poschedule-handovertime.
+        wa_evlog_po-h_created_by = lv_bapimepoheader-created_by.
+        wa_evlog_po-h_vendor = lv_bapimepoheader-vendor.
+        wa_evlog_po-h_dscnt1_to = lv_bapimepoheader-dscnt1_to.
+        wa_evlog_po-h_dscnt2_to   = lv_bapimepoheader-dscnt2_to.
+        wa_evlog_po-h_dscnt3_to   = lv_bapimepoheader-dscnt3_to.
+        wa_evlog_po-h_dsct_pct1   = lv_bapimepoheader-dsct_pct1.
+        wa_evlog_po-h_dsct_pct2   = lv_bapimepoheader-dsct_pct2.
+        wa_evlog_po-h_purch_org  = lv_bapimepoheader-purch_org.
+        wa_evlog_po-h_quotation    = lv_bapimepoheader-quotation.
+        wa_evlog_po-h_suppl_vend  = lv_bapimepoheader-suppl_vend.
+        wa_evlog_po-h_customer     = lv_bapimepoheader-customer.
+        wa_evlog_po-h_shiptype  = lv_bapimepoheader-vendor.
+        SELECT SINGLE quantity AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_quantity.
+        SELECT SINGLE plant AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_plant.
+        SELECT SINGLE stge_loc AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_stge_loc.
+        SELECT SINGLE net_price AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_net_price.
+        SELECT SINGLE qual_insp AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_qual_insp.
+        SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @wa_poschedule-po_item INTO @wa_evlog_po-m_material.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_po INTO TABLE it_evlog_po.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  CLEAR ld_et_cdred_str.
+  CLEAR it_editpos_po[].
+  CLEAR ld_ekko_ebeln_cdred.
+  ld_ekko_ebeln_cdred = it_ekko_ebeln.
+  "Aufruf des Funktionsbausteins CHANGEDOCUMENT_READ um die Events mit den Änderungen an den Business Objekten zu erhalten
+  CALL FUNCTION 'CHANGEDOCUMENT_READ'
+    EXPORTING
+      objectclass                = 'EINKBELEG'
+      objectid                   = ld_ekko_ebeln_cdred
+    IMPORTING
+      et_cdred_str               = ld_et_cdred_str
+    TABLES
+      editpos                    = it_editpos_po
+    EXCEPTIONS
+      no_position_found          = 1
+      wrong_access_to_archive    = 2
+      time_zone_conversion_error = 3
+    .  "  CHANGEDOCUMENT_READ
+  IF sy-subrc EQ 0.
+    LOOP AT it_editpos_po.
+      CLEAR wa_evlog_po.
+
+      wa_evlog_po-id = it_ekko_ebeln.
+      CASE it_editpos_po-chngind.
+        WHEN 'D'.
+          wa_evlog_po-activity_name = 'delete purchaseorder'.
+        WHEN 'I' OR 'J'.
+          wa_evlog_po-activity_name = 'insert purchaseorder'.
+        WHEN 'U'.
+          wa_evlog_po-f_new = it_editpos_po-f_new.
+          wa_evlog_po-f_old = it_editpos_po-f_old.
+          wa_evlog_po-h_tabkey = it_editpos_po-tabkey.
+
+          l_offset = strlen( wa_evlog_po-h_tabkey ) - 5.
+          IF l_offset > 0.
+            l_last5 = wa_evlog_po-h_tabkey+l_offset(5).
+          ENDIF.
+          SELECT SINGLE material AS q FROM @it_poitem AS poitem WHERE po_item = @l_last5 INTO @wa_evlog_po-m_material.
+
+          CASE it_editpos_po-fname.
+            WHEN 'MENGE'.
+              wa_evlog_po-activity_name = 'change volume'.
+            WHEN 'EINDT'.
+              wa_evlog_po-activity_name = 'change delivery date'.
+            WHEN 'NETWR'.
+              wa_evlog_po-activity_name = 'change price'.
+            WHEN 'NETPR'.
+              wa_evlog_po-activity_name = 'change unit price'.
+            WHEN OTHERS.
+
+
+              wa_evlog_po-activity_name = 'update purchaseorder'.
+          ENDCASE.
+        WHEN 'E'.
+          wa_evlog_po-activity_name = 'partly delete purchaseorder'.
+        WHEN OTHERS.
+          wa_evlog_po-activity_name = 'unknown change purchaseorder'.
+      ENDCASE.
+
+      wa_evlog_po-timestamp = it_editpos_po-udate && it_editpos_po-utime.
+
+      "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+      INSERT wa_evlog_po INTO TABLE it_evlog_po.
+
+    ENDLOOP.
+  ENDIF.
+ENDLOOP.

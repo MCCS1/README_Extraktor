@@ -1,0 +1,296 @@
+FUNCTION Z_PG_INGESTION_API.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     REFERENCE(TABLE_TO_SEND) TYPE  STANDARD TABLE
+*"     REFERENCE(IS_EVENT_LOG) TYPE  STRING OPTIONAL
+*"     REFERENCE(PROCESS_NAME) TYPE  STRING
+*"     REFERENCE(BUSINESS_OBJECT) TYPE  STRING OPTIONAL
+*"  EXPORTING
+*"     REFERENCE(MESSAGE) TYPE  STRING
+*"----------------------------------------------------------------------
+
+
+DATA: tab_line TYPE REF TO DATA,
+      tab TYPE REF TO DATA,
+      dy_line type ref to data.
+CREATE DATA tab LIKE table_to_send.
+CREATE DATA tab_line LIKE LINE OF table_to_send.
+
+
+DATA : idetails TYPE abap_compdescr_tab,
+       xdetails TYPE abap_compdescr,
+       string_header TYPE STRING,
+       string_data TYPE STRING,
+       schema_header TYPE STRING,
+       temp_type TYPE STRING,
+       temp_line TYPE STRING,
+       TEMP_VAL TYPE STRING.
+DATA : ref_table_des TYPE REF TO cl_abap_structdescr.
+
+FIELD-SYMBOLS: <dyn_table> TYPE STANDARD TABLE,
+               <dyn_wa>,
+               <dyn_field>.
+CREATE DATA dy_line LIKE LINE OF table_to_send.
+ASSIGN dy_line->* TO <dyn_wa>.
+
+*** GET COMPONENTS OF TABLE ***
+ref_table_des ?= cl_abap_typedescr=>DESCRIBE_BY_DATA_REF( tab_line ).
+idetails[] = ref_table_des->components[].
+
+
+*** PREPARING HEADERS ***
+
+LOOP AT idetails INTO xdetails.
+   CONCATENATE string_header ',' xdetails-name INTO string_header.
+   IF xdetails-name = 'TIMESTAMP'.
+        TEMP_TYPE = '{ "type": "long" , "logicalType" : "timestamp-millis" }'.
+   ELSEIF XDETAILS-TYPE_KIND = 'P'.
+        TEMP_TYPE = '["null", "double"]'.
+   ELSE.
+        TEMP_TYPE = '["null", "string"]'.
+   ENDIF.
+   condense xdetails-name.
+*   write :/ '{"name": "',  xdetails-name, '", "type": ', TEMP_TYPE, '},' .
+   CONCATENATE SCHEMA_HEADER ',' '{"name": "'  xdetails-name '", "type": ' TEMP_TYPE '}' INTO SCHEMA_HEADER.
+ENDLOOP.
+
+
+string_header = substring_after( val = string_header sub = ',' ).
+SCHEMA_HEADER = substring_after( val = SCHEMA_HEADER sub = ',' ).
+
+****** GET THE NAME OF THE TABLE******
+DATA TABLE_STR TYPE STRING.
+IF IS_EVENT_LOG = 'Y'.
+  CONCATENATE PROCESS_NAME
+  '_EventLog'
+  INTO TABLE_STR.
+ELSE.
+  CONCATENATE PROCESS_NAME
+  '_'
+  BUSINESS_OBJECT
+  INTO TABLE_STR.
+ENDIF.
+
+CONCATENATE
+'{"type": "record", "delimiter": ",", "name": "'
+TABLE_STR
+'", "fields": ['
+SCHEMA_HEADER
+']} ' INTO schema_HEADER.
+
+
+*** PREPARING CSV FILE ***
+
+ LOOP AT table_to_send INTO <dyn_wa>.
+   DO.
+      ASSIGN COMPONENT sy-index OF STRUCTURE <dyn_wa> TO <dyn_field>.
+      IF sy-subrc NE 0.
+        EXIT.
+      ENDIF.
+
+      TEMP_VAL = CONV STRING( <dyn_field> ).
+      CONDENSE TEMP_VAL.
+      CONCATENATE  temp_line ',' TEMP_VAL INTO TEMP_LINE.
+   ENDDO.
+
+   TEMP_LINE = substring_after( val = TEMP_LINE sub = ',' ).
+   CONCATENATE STRING_DATA CL_ABAP_CHAR_UTILITIES=>NEWLINE TEMP_LINE INTO STRING_DATA.
+   CLEAR TEMP_LINE.
+ENDLOOP.
+
+CONCATENATE STRING_HEADER STRING_DATA INTO STRING_DATA.
+
+DATA lv_xstring TYPE XSTRING.
+
+CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+EXPORTING
+text = STRING_DATA
+IMPORTING
+buffer = lv_xstring.
+
+
+*** PREPARE TOKEN***
+DATA token_value TYPE string.
+
+
+IF PROCESS_NAME = 'BD9'.
+  CONCATENATE
+  ' ZjAxMzliYzUtODZjYy00YTEyLTg0MzQtYTllNGE1MzNjNTIxOm'
+  'JlNDAwMzdjLWM2NmYtNDFkMC1hNzE1LWZiNzdjYWVlMzdkYzowY'
+  'TYxYzljZTBlZjY0MWEyYjQ5MDRhMTQ5YmQ3NGVlMDp4S2tlckNS'
+  'VkhYaFQ2THhzYU04Nlpzdk5pU2pOT2RqQjJQTkZpank5RTFKNGN'
+  'lcmFESG41NzRYaE9GbUF2alNH'
+  INTO TOKEN_VALUE.
+ELSEIF PROCESS_NAME = 'J45'.
+  CONCATENATE
+  ' NTc4Y2Q1N2ItMDQxNi00ZDMxLWEzNjctOTZhZmJiOTU4ZGQ3Oj'
+  'IxZjhmMGE1LTNiNmUtNGYxOS04NzY4LTUwNTc5ZDlmZGU0MDowY'
+  'TYxYzljZTBlZjY0MWEyYjQ5MDRhMTQ5YmQ3NGVlMDpHSEtzVXJ4'
+  'QmduMVhPWVBpQ1Zkd0g4ZDI5ZXVzVXYyakFvdTNZcjdrcmlUWjd'
+  'HdFhOZHZGWEpBUGNKM2pwNDd6'
+  INTO TOKEN_VALUE.
+ENDIF.
+
+
+CONCATENATE
+'Bearer '
+token_value
+
+INTO token_value.
+
+
+**********************************************
+************** HTTP Request*******************
+**********************************************
+
+** Get a client in lo_client and set method to POST
+cl_http_client=>create_by_url(
+  EXPORTING
+    url                = 'https://spi-etl-ingestion.eu-prod-cloud-os-eu.suite-saas-prod.signav.io/ingestion/data'
+  IMPORTING
+    client             = DATA(lo_client)
+  EXCEPTIONS
+    argument_not_found = 1
+    plugin_not_active  = 2
+    internal_error     = 3
+    OTHERS             = 4 ).
+
+lo_client->request->set_method( if_http_request=>co_request_method_post ).
+
+
+
+** prepare header fields
+* first the authorization
+
+
+lo_client->request->set_header_field(
+      EXPORTING
+        name  = 'Authorization'    " Name of the header field
+        value = token_value
+    ).
+
+lo_client->request->set_header_field( name  = 'Content-Type' value = 'multipart/form-data' ). "#EC NOTEXT
+lo_client->request->set_header_field( name  = 'Accept' value = 'application/json' ).
+
+
+
+** Adding values for schema, primaryKeys and delimiter parts to request
+**
+
+** Steps are as follows:
+** 1. add a request part
+** 2. set part header field of content_disposition to name of the part
+** 3. set the form field of that name to the value we need.
+
+DATA:
+lo_request_part type ref to if_http_entity,
+lv_content_disposition type string,
+lv_xstring_holder type xstring.
+
+** Setting schema
+lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+
+CALL METHOD lo_request_part->SET_header_FIELD
+EXPORTING
+NAME ='content-disposition'
+VALUE ='form-data;name="schema"'.
+
+lo_client->request->set_form_field( name = 'schema' value = SCHEMA_HEADER ).
+
+CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+EXPORTING
+text = SCHEMA_HEADER" variable type string
+IMPORTING
+buffer = lv_xstring_holder.
+
+CALL METHOD lo_request_part->set_data
+EXPORTING
+data = lv_xstring_holder
+offset = 0.
+
+
+** Setting pks
+lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+
+CALL METHOD lo_request_part->SET_header_FIELD
+EXPORTING
+NAME ='content-disposition'
+VALUE ='form-data;name="primaryKeys"'.
+
+
+CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+EXPORTING
+text = 'ID,ACTIVITY_NAME,TIMESTAMP'" variable type string
+IMPORTING
+buffer = lv_xstring_holder.
+
+CALL METHOD lo_request_part->set_data
+EXPORTING
+data = lv_xstring_holder
+offset = 0.
+
+
+**************************************************************
+*******************************File***************************
+**************************************************************
+
+lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+
+DATA FILE_NAME_STR TYPE STRING.
+CONCATENATE 'form-data;name="file1";filename="'
+            TABLE_STR
+            '.csv"'
+INTO FILE_NAME_STR.
+
+CALL METHOD lo_request_part->SET_header_FIELD
+EXPORTING
+NAME ='content-disposition'
+VALUE = FILE_NAME_STR.
+
+CALL METHOD LO_CLIENT->REQUEST->IF_HTTP_ENTITY~SET_FORMFIELD_ENCODING
+EXPORTING
+FORMFIELD_ENCODING = CL_HTTP_REQUEST=>IF_HTTP_ENTITY~CO_ENCODING_RAW .
+
+lo_request_part->set_content_type( 'text/csv' ).
+
+CALL METHOD lo_request_part->set_data
+EXPORTING
+data = lv_xstring
+offset = 0.
+
+lo_client->send(
+  EXCEPTIONS
+    http_communication_failure = 1
+    http_invalid_state         = 2
+    http_processing_failed     = 3
+    OTHERS                     = 4 ).
+
+* Ergebnis aufnehmen
+lo_client->receive(
+   EXCEPTIONS
+   http_communication_failure = 1
+   http_invalid_state         = 2
+   http_processing_failed     = 3
+   OTHERS                     = 4 ).
+
+
+
+" Daten abholen
+DATA(ld_stream) = lo_client->response->get_cdata( ).
+write ld_stream.
+
+DATA: lv_http_status TYPE i.
+DATA: lv_status_text TYPE string.
+
+* HTTP Return Code holen
+lo_client->response->get_status( IMPORTING
+                                  code   = lv_http_status
+                                  reason = lv_status_text ).
+
+
+lo_client->close( ).
+
+MESSAGE = lv_status_text.
+
+ENDFUNCTION.

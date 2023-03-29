@@ -1,0 +1,159 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_SALESORDER
+*&---------------------------------------------------------------------*
+
+*Create Salesorder
+DATA:
+  it_customer_number    TYPE STANDARD TABLE OF bapi1007-customer WITH HEADER LINE,
+  it_sales_organization TYPE STANDARD TABLE OF bapiorders-sales_org WITH HEADER LINE,
+  wa_sales_organization LIKE LINE OF it_sales_organization,
+  it_editpos_wa         TYPE STANDARD TABLE OF cdred WITH HEADER LINE.
+
+"Die Kundennummer werden in einer internen Tabelle für den Aufruf der BAPI gespeichert
+SELECT kunnr
+  FROM kna1
+INTO TABLE it_customer_number.
+
+"Die Verkaufsorganisationen werden in einer internen Tabelle für den Aufruf der BAPI gespeichert
+SELECT vkorg
+FROM tvko
+INTO TABLE it_sales_organization.
+
+"Aufruf des Funktionsbausteins CHANGEDOCUMENT_READ um die Events mit den Änderungen an den Business Objekt Salesorder zu erhalten
+CALL FUNCTION 'CHANGEDOCUMENT_READ'
+  EXPORTING
+    objectclass                = 'VERKBELEG'
+  IMPORTING
+    et_cdred_str               = ld_et_cdred_str
+  TABLES
+    editpos                    = it_editpos
+  EXCEPTIONS
+    no_position_found          = 1
+    wrong_access_to_archive    = 2
+    time_zone_conversion_error = 3
+  .  "  CHANGEDOCUMENT_READ
+
+
+LOOP AT it_sales_organization.
+  LOOP AT it_customer_number.
+INSERT it_sales_orders-sd_doc INTO TABLE it_salesordern.
+    CALL FUNCTION 'BAPI_SALESORDER_GETLIST'
+      EXPORTING
+        customer_number    = it_customer_number
+        sales_organization = it_sales_organization
+        transaction_group  = '0'
+
+      IMPORTING
+        return             = ld_return
+      TABLES
+        sales_orders       = it_sales_orders.  "  BAPI_SALESORDER_GETLIST
+
+    LOOP AT it_sales_orders.
+      INSERT it_sales_orders-sd_doc INTO TABLE it_salesordern.
+      CLEAR wa_evlog_salesorder.
+      "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+      wa_evlog_salesorder-id = it_sales_orders-sd_doc.
+      CASE it_sales_orders-doc_type.
+        WHEN 'TA'.
+          wa_evlog_salesorder-activity_name = 'create forward order'.
+        WHEN 'SO'.
+          wa_evlog_salesorder-activity_name = 'create rush order'.
+        WHEN OTHERS.
+          wa_evlog_salesorder-activity_name = 'create salesorder'.
+      ENDCASE.
+
+      wa_evlog_salesorder-timestamp = it_sales_orders-creation_date && it_sales_orders-creation_time.
+      wa_evlog_salesorder-material = it_sales_orders-material.
+      wa_evlog_salesorder-doctype = it_sales_orders-doc_type.
+      wa_evlog_salesorder-purch_no = it_sales_orders-purch_no.
+      wa_evlog_salesorder-client = it_sales_orders-sold_to.
+
+      wa_evlog_salesorder-net_price = it_sales_orders-net_price.
+      IF wa_evlog_salesorder-timestamp NE '00000000000000'.
+        "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+        INSERT wa_evlog_salesorder INTO TABLE it_evlog_salesorder.
+      ENDIF.
+
+
+
+      LOOP AT it_editpos WHERE objectid = it_sales_orders-sd_doc.
+        CLEAR wa_evlog_salesorder.
+        "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+        wa_evlog_salesorder-id = it_sales_orders-sd_doc.
+        CASE it_editpos-chngind.
+          WHEN 'D'.
+            wa_evlog_salesorder-activity_name = 'delete salesorder'.
+          WHEN 'I' OR 'J'.
+            wa_evlog_salesorder-activity_name = 'insert salesorder'.
+          WHEN 'U'.
+            CASE it_editpos-fname.
+              WHEN 'NETPR'.
+                wa_evlog_salesorder-activity_name = 'change price'.
+                wa_evlog_salesorder-new_net_price = it_editpos_wa-f_new.
+                wa_evlog_salesorder-old_net_price = it_editpos_wa-f_old.
+              WHEN 'WMENG'.
+                wa_evlog_salesorder-activity_name = 'change amount'.
+                wa_evlog_salesorder-new_menge = it_editpos_wa-f_new.
+                wa_evlog_salesorder-old_menge = it_editpos_wa-f_old.
+              WHEN OTHERS.
+                wa_evlog_salesorder-activity_name = 'change salesorder'.
+            ENDCASE.
+          WHEN 'E'.
+            wa_evlog_salesorder-activity_name = 'partly delete salesorder'.
+        ENDCASE.
+        wa_evlog_salesorder-reason = it_editpos-ftext.
+        wa_evlog_salesorder-timestamp = it_editpos-udate && it_editpos-utime.
+
+        IF wa_evlog_salesorder-timestamp NE '00000000000000'.
+          "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+          INSERT wa_evlog_salesorder INTO TABLE it_evlog_salesorder.
+        ENDIF.
+      ENDLOOP.
+
+
+
+*      LOOP AT it_editpos.
+*
+*        IF it_editpos-objectid EQ it_sales_orders-sd_doc.
+*          CLEAR wa_evlog.
+*          wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*
+*          CASE it_editpos-chngind.
+*            WHEN 'D'.
+*              wa_evlog-activity_name = 'delete Salesorder'.
+*            WHEN 'I' OR 'J'.
+*              wa_evlog-activity_name = 'insert Salesorder'.
+*            WHEN 'U'.
+*              wa_evlog-activity_name = 'change Salesorder'.
+*            WHEN 'E'.
+*              wa_evlog-activity_name = 'partly delete Salesorder'.
+*          ENDCASE.
+*          wa_evlog-reason = it_editpos-ftext.
+*          wa_evlog-timestamp = it_editpos-udate && it_editpos-utime.
+*
+*          IF wa_evlog-timestamp NE '00000000000000'.
+*            INSERT wa_evlog INTO TABLE it_evlog.
+*          ENDIF.
+*        ENDIF.
+*      ENDLOOP.
+
+    ENDLOOP.
+    "WRITE lines( it_salesordern ).
+  ENDLOOP.
+ENDLOOP.
+
+
+
+
+
+
+*IF sy-subrc EQ 0.
+*  MESSAGE 'Ok' TYPE 'I'.
+*ENDIF.
+
+
+*cl_demo_output=>display( it_sales_orders ).
+
+
+
+*cl_demo_output=>display( it_evlog ).

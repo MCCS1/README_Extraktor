@@ -1,0 +1,473 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_DELIVERY
+*&---------------------------------------------------------------------*
+
+DATA: ld_is_dlv_data_control TYPE bapidlvbuffercontrol.
+
+ld_is_dlv_data_control-bypassing_buffer = ''.
+ld_is_dlv_data_control-head_status = ''.
+ld_is_dlv_data_control-head_partner = ''.
+ld_is_dlv_data_control-item = ''.
+ld_is_dlv_data_control-item_status = ''.
+ld_is_dlv_data_control-doc_flow = ''.
+ld_is_dlv_data_control-ft_data = ''.
+ld_is_dlv_data_control-hu_data = ''.
+ld_is_dlv_data_control-serno = ''.
+
+TYPES: BEGIN OF t_mapping,
+         vbelv TYPE vbfa-vbelv,
+         vbeln TYPE vbfa-vbeln,
+
+       END OF t_mapping.
+
+DATA:
+  it_et_delivery_header    TYPE TABLE OF bapidlvhdr WITH HEADER LINE,
+*  it_et_delivery_item   TYPE TABLE OF bapidlvitem  WITH HEADER LINE,
+*  it_et_delivery_header_sts  TYPE TABLE OF bapidlvhdrsts WITH HEADER LINE,
+*  it_et_delivery_item_sts    TYPE TABLE OF bapidlvitemsts WITH HEADER LINE,
+*  it_et_delivery_partner     TYPE TABLE OF bapidlvpartners WITH HEADER LINE,
+*  it_et_document_flow   TYPE TABLE OF bapidocflow WITH HEADER LINE,
+  it_order_flows 	         TYPE STANDARD TABLE OF bapisdflow WITH HEADER LINE,
+  it_bapisdflow_compleate  TYPE STANDARD TABLE OF bapisdflow WITH HEADER LINE,
+  ld_order_header          TYPE bapisdhd,
+  it_return                TYPE STANDARD TABLE OF bapiret2,
+  it_editpos_delivery_wa   TYPE STANDARD TABLE OF bapidlvhdr WITH HEADER LINE,
+  it_et_delivery_header_wa TYPE STANDARD TABLE OF bapidlvhdr WITH HEADER LINE,
+  it_order_flows_wa        TYPE STANDARD TABLE OF bapisdflow WITH HEADER LINE,
+  it_mapping               TYPE STANDARD TABLE OF t_mapping INITIAL SIZE 0 WITH HEADER LINE,
+  lt_vbeln                 TYPE STANDARD TABLE OF bapidlv_range_vbeln WITH HEADER LINE,
+  ls_vbeln                 TYPE  bapidlv_range_vbeln.
+*  it_et_foreign_trade_header TYPE TABLE OF bapiforeigntradehdr WITH HEADER LINE,
+*  it_et_foreign_trade_item   TYPE TABLE OF bapiforeigntradeitem WITH HEADER LINE,
+*  it_et_hu_header            TYPE TABLE OF bapidlvhandlingunithdr WITH HEADER LINE,
+*  it_et_item_serial_no       TYPE TABLE OF bapidlvitmserno WITH HEADER LINE,
+*  it_extensionin             TYPE TABLE OF bapiparex WITH HEADER LINE,
+*  it_extensionout            TYPE TABLE OF bapiparex WITH HEADER LINE,
+*  it_return                  TYPE TABLE OF bapiret2 WITH HEADER LINE.
+
+
+
+
+
+
+
+
+SELECT vbelv, vbeln
+  FROM vbfa
+  "WHERE vbelv = @it_salesordern
+  INTO TABLE @it_mapping.
+
+
+
+LOOP AT it_mapping.
+  CLEAR lt_vbeln[].
+  CLEAR it_et_delivery_header[].
+  CLEAR ls_vbeln.
+  ls_vbeln-sign  = 'I'.
+  ls_vbeln-option  = 'EQ'.
+  ls_vbeln-deliv_numb_low  = it_mapping-vbeln.
+  APPEND ls_vbeln TO lt_vbeln.
+  CALL FUNCTION 'BAPI_DELIVERY_GETLIST'
+    EXPORTING
+      is_dlv_data_control = ld_is_dlv_data_control
+    TABLES
+      it_vbeln            = lt_vbeln
+      et_delivery_header  = it_et_delivery_header
+    .  "  BAPI_DELIVERY_GETLIST
+  IF sy-subrc <> 0 .
+
+  ENDIF.
+
+  LOOP AT it_et_delivery_header.
+    CLEAR wa_evlog_delivery.
+    "wa_evlog-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+    wa_evlog_delivery-id = it_mapping-vbelv.
+    wa_evlog_delivery-activity_name = 'create delivery'.
+    wa_evlog_delivery-timestamp = it_et_delivery_header-erdat && it_et_delivery_header-erzet.
+    wa_evlog_delivery-type_of_delivery = it_et_delivery_header-lfart.
+    wa_evlog_delivery-goods_recipient = it_et_delivery_header-kunnr.
+    wa_evlog_delivery-wight = it_et_delivery_header-ntgew.
+    wa_evlog_delivery-net_worth = it_et_delivery_header-netwr.
+    IF wa_evlog_delivery-timestamp NE '00000000000000'.
+      INSERT wa_evlog_delivery INTO TABLE it_evlog_delivery.
+    ENDIF.
+
+
+
+
+    CLEAR wa_evlog_delivery.
+    "wa_evlog-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+    wa_evlog_delivery-id = it_mapping-vbelv.
+    wa_evlog_delivery-activity_name = 'create commission'.
+    wa_evlog_delivery-timestamp = it_et_delivery_header-kodat && it_et_delivery_header-kouhr.
+    wa_evlog_delivery-type_of_delivery = it_et_delivery_header-lfart.
+    wa_evlog_delivery-goods_recipient = it_et_delivery_header-kunnr.
+    wa_evlog_delivery-wight = it_et_delivery_header-ntgew.
+    wa_evlog_delivery-net_worth = it_et_delivery_header-netwr.
+    IF wa_evlog_delivery-timestamp NE '00000000000000' AND it_et_delivery_header-kouhr NE '000000'.
+      INSERT wa_evlog_delivery INTO TABLE it_evlog_delivery.
+    ENDIF.
+    CLEAR wa_evlog_delivery.
+    "wa_evlog-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+    wa_evlog_delivery-id = it_mapping-vbelv.
+    wa_evlog_delivery-activity_name = 'create goods issue'.
+    "Flag! Eigene Daten
+    IF it_et_delivery_header-spe_wauhr_ist NE '000000'.
+      wa_evlog_delivery-timestamp = it_et_delivery_header-wadat_ist && it_et_delivery_header-spe_wauhr_ist.
+    ELSE.
+      wa_evlog_delivery-timestamp = it_et_delivery_header-wadat_ist && '235958'.
+    ENDIF.
+    wa_evlog_delivery-type_of_delivery = it_et_delivery_header-lfart.
+    wa_evlog_delivery-goods_recipient = it_et_delivery_header-kunnr.
+    wa_evlog_delivery-wight = it_et_delivery_header-ntgew.
+    wa_evlog_delivery-net_worth = it_et_delivery_header-netwr.
+    IF wa_evlog_delivery-timestamp NE '00000000000000' AND wa_evlog_delivery-timestamp NE '00000000235958'.
+      INSERT wa_evlog_delivery INTO TABLE it_evlog_delivery.
+    ENDIF.
+*Flag einfügen für selbstgenerierte Daten!
+    CLEAR wa_evlog_delivery.
+    "wa_evlog-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+    wa_evlog_delivery-id = it_mapping-vbelv.
+    wa_evlog_delivery-activity_name = 'create invoice'.
+    wa_evlog_delivery-timestamp = it_et_delivery_header-fkdat && '235959'.
+    wa_evlog_delivery-type_of_delivery = it_et_delivery_header-lfart.
+    wa_evlog_delivery-goods_recipient = it_et_delivery_header-kunnr.
+    wa_evlog_delivery-wight = it_et_delivery_header-ntgew.
+    wa_evlog_delivery-net_worth = it_et_delivery_header-netwr.
+    IF wa_evlog_delivery-timestamp NE '00000000000000' AND wa_evlog_delivery-timestamp NE '00000000235959' .
+      INSERT wa_evlog_delivery INTO TABLE it_evlog_delivery.
+    ENDIF.
+
+  ENDLOOP.
+
+*clear it_editpos_delivery[].
+*CALL FUNCTION 'CHANGEDOCUMENT_READ'
+*  EXPORTING
+**   archive_handle             = ld_archive_handle
+**   changenumber               = ld_changenumber
+**   date_of_change             = ld_date_of_change
+*    objectclass                = 'LIEFERUNG'
+*    objectid                   = it_mapping-vbeln
+**   tablekey                   = ld_tablekey
+**   tablename                  = ld_tablename
+**   time_of_change             = ld_time_of_change
+**   username                   = ld_username
+**   local_time                 = ld_local_time
+**   time_zone                  = ld_time_zone
+**   tablekey254                = ld_tablekey254
+**   keyguid                    = ld_keyguid
+**   date_until                 = ld_date_until
+**   time_until                 = ld_time_until
+**   keyguid_str                = ld_keyguid_str
+**   read_changedocu            = ld_read_changedocu
+*  IMPORTING
+*    et_cdred_str               = ld_et_cdred_str
+*  TABLES
+*    editpos                    = it_editpos_delivery
+*  EXCEPTIONS
+*    no_position_found          = 1
+*    wrong_access_to_archive    = 2
+*    time_zone_conversion_error = 3
+*  .  "  CHANGEDOCUMENT_READ
+
+
+  LOOP AT it_editpos_delivery WHERE objectid = it_mapping-vbeln.
+    new_timestamp = it_editpos_delivery-udate && it_editpos_delivery-utime.
+    "IF wa_evlog-timestamp <> new_timestamp.
+    "IF it_et_delivery_header-vbeln EQ it_editpos_delivery-objectid.
+    CLEAR wa_evlog_delivery.
+    "wa_evlog-id = it_sales_orders-plant && '-' && it_mapping-vbelv && '-' && it_sales_orders-itm_number.
+    wa_evlog_delivery-id = it_mapping-vbelv.
+    CASE it_editpos_delivery-chngind.
+      WHEN 'D'.
+        wa_evlog_delivery-activity_name = 'delete delivery'.
+      WHEN 'I' OR 'J'.
+        wa_evlog_delivery-activity_name = 'insert delivery'.
+      WHEN 'U'.
+        "wa_evlog-activity_name = it_editpos-ftext.
+        wa_evlog_delivery-activity_name = 'update delivery'.
+      WHEN 'E'.
+        wa_evlog_delivery-activity_name = 'partly delete delivery'.
+    ENDCASE.
+    wa_evlog_delivery-reason = it_editpos-ftext.
+    wa_evlog_delivery-lnummer_change = it_mapping-vbeln.
+    wa_evlog_delivery-timestamp = it_editpos_delivery-udate && it_editpos_delivery-utime.
+
+    IF wa_evlog_delivery-timestamp NE '00000000000000' AND wa_evlog_delivery-timestamp NE '00000000235959'.
+      INSERT wa_evlog_delivery INTO TABLE it_evlog_delivery.
+    ENDIF.
+    "ENDIF.
+    "ENDIF.
+  ENDLOOP.
+ENDLOOP.
+
+
+
+
+
+
+
+
+
+
+*  LOOP AT it_salesordern.
+*    CLEAR it_order_flows[].
+*    CALL FUNCTION 'BS01_SALESORDER_GETDETAIL'
+*      EXPORTING
+*        salesdocument = it_salesordern
+*      IMPORTING
+*        order_header  = ld_order_header
+*      TABLES
+*        return        = it_return
+*        order_flows   = it_order_flows
+*      .  "  BS01_SALESORDER_GETDETAIL
+*
+*    APPEND it_order_flows TO it_bapisdflow_compleate.
+*
+*  ENDLOOP.
+*
+*  DATA(l) = lines( it_salesordern ).
+*  cl_demo_output=>display( l ).
+
+
+
+*endloop.
+
+*SELECT * from @it_et_delivery_header as delivery
+*  JOIN @it_order_flows as flow on delivery~vbeln = flow~subssddoc
+*  where it_et_delivery_header-vbeln = it_order_flows-subssddoc
+*  INTO @DATA(result).
+
+*select * from @it_et_delivery_header as delivery where delivery~vbeln =
+
+
+"LOOP AT it_order_flows WHERE sd_doc EQ it_salesordern.
+*LOOP AT it_order_flows_wa.
+
+*READ TABLE it_et_delivery_header
+*WITH KEY vbeln = it_order_flows_wa-subssddoc
+*INTO it_et_delivery_header_wa.
+*
+*LOOP AT it_et_delivery_header_wa.
+*  "WHERE vbeln EQ it_order_flows-subssddoc.
+*
+**      READ TABLE it_editpos_delivery
+**    WITH KEY
+**    INTO it_editpos__delivery_wa.
+**      IF sy-subrc = 0.
+**
+**      ENDIF.
+*
+**      LOOP AT it_editpos_delivery where objectid = it_et_delivery_header-vbeln.
+**        "IF it_et_delivery_header-vbeln EQ it_editpos_delivery-objectid.
+**        CLEAR wa_evlog.
+**        wa_evlog-id = it_sales_orders-plant && '-' && it_salesordern && '-' && it_sales_orders-itm_number.
+**
+**        CASE it_editpos_delivery-chngind.
+**          WHEN 'D'.
+**            wa_evlog-activity_name = 'delete delivery'.
+**          WHEN 'I' OR 'J'.
+**            wa_evlog-activity_name = 'insert delivery'.
+**          WHEN 'U'.
+**            "wa_evlog-activity_name = it_editpos-ftext.
+**            wa_evlog-activity_name = 'update delivery'.
+**          WHEN 'E'.
+**            wa_evlog-activity_name = 'partly delete delivery'.
+**        ENDCASE.
+**        wa_evlog-reason = it_editpos-ftext.
+**        wa_evlog-timestamp = it_editpos_delivery-udate && it_editpos_delivery-utime.
+**
+**        IF wa_evlog-timestamp NE '00000000000000'.
+**          INSERT wa_evlog INTO TABLE it_evlog.
+**        ENDIF.
+**        "ENDIF.
+**      ENDLOOP.
+*
+*
+*
+*
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_order_flows_wa-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create delivery'.
+*  wa_evlog-timestamp = it_et_delivery_header-erdat && it_et_delivery_header-erzet.
+*  wa_evlog-type_of_delivery = it_et_delivery_header-lfart.
+*  wa_evlog-goods_recipient = it_et_delivery_header-kunnr.
+*  wa_evlog-wight = it_et_delivery_header-ntgew.
+*  wa_evlog-net_worth = it_et_delivery_header-netwr.
+*  IF wa_evlog-timestamp NE '00000000000000'.
+*    INSERT wa_evlog INTO TABLE it_evlog.
+*  ENDIF.
+*
+*
+*
+*
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_order_flows_wa-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create commission'.
+*  wa_evlog-timestamp = it_et_delivery_header-kodat && it_et_delivery_header-kouhr.
+*  wa_evlog-type_of_delivery = it_et_delivery_header-lfart.
+*  wa_evlog-goods_recipient = it_et_delivery_header-kunnr.
+*  wa_evlog-wight = it_et_delivery_header-ntgew.
+*  wa_evlog-net_worth = it_et_delivery_header-netwr.
+*  IF wa_evlog-timestamp NE '00000000000000' AND it_et_delivery_header-kouhr NE '000000'.
+*    INSERT wa_evlog INTO TABLE it_evlog.
+*  ENDIF.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_order_flows_wa-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create goods issue'.
+*  wa_evlog-timestamp = it_et_delivery_header-wadat_ist && it_et_delivery_header-spe_wauhr_ist.
+*  wa_evlog-type_of_delivery = it_et_delivery_header-lfart.
+*  wa_evlog-goods_recipient = it_et_delivery_header-kunnr.
+*  wa_evlog-wight = it_et_delivery_header-ntgew.
+*  wa_evlog-net_worth = it_et_delivery_header-netwr.
+*  IF wa_evlog-timestamp NE '00000000000000'.
+*    INSERT wa_evlog INTO TABLE it_evlog.
+*  ENDIF.
+**Flag einfügen für selbstgenerierte Daten!
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_order_flows_wa-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create faktura'.
+*  wa_evlog-timestamp = it_et_delivery_header-fkdat && '235959'.
+*  wa_evlog-type_of_delivery = it_et_delivery_header-lfart.
+*  wa_evlog-goods_recipient = it_et_delivery_header-kunnr.
+*  wa_evlog-wight = it_et_delivery_header-ntgew.
+*  wa_evlog-net_worth = it_et_delivery_header-netwr.
+*  IF wa_evlog-timestamp NE '00000000000000'.
+*    INSERT wa_evlog INTO TABLE it_evlog.
+*  ENDIF.
+*
+*  EXIT.
+*
+**      EXIT.
+*ENDLOOP.
+
+
+*  ENDLOOP.
+
+*ENDLOOP.
+
+
+
+
+
+**Create Delivery
+*LOOP AT it_sales_orders.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create delivery'.
+*  LOOP AT it_et_delivery_item.
+*    IF it_sales_orders-sd_doc EQ it_et_delivery_item-paobjnr.
+*      wa_evlog-timestamp = it_et_delivery_item-erdat && it_et_delivery_item-erzet.
+*      INSERT wa_evlog INTO TABLE it_evlog.
+**      EXIT.
+*    ENDIF.
+*  ENDLOOP.
+*
+*ENDLOOP.
+*
+*
+*
+*
+*
+*
+**Create delivery logs
+*LOOP AT it_sales_orders.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*
+*  LOOP AT it_et_delivery_item.
+*    IF it_sales_orders-sd_doc EQ it_et_delivery_item-paobjnr.
+*      LOOP AT it_et_delivery_header.
+*        IF it_et_delivery_header-vbeln EQ it_et_delivery_item-vbeln.
+*          wa_evlog-activity_name = 'create commission'.
+*          wa_evlog-timestamp = it_et_delivery_header-kodat && it_et_delivery_header-kouhr.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*
+*          wa_evlog-activity_name = 'create goods issue'.
+*          wa_evlog-timestamp = it_et_delivery_header-wadat_ist && it_et_delivery_header-spe_wauhr_ist.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*
+*          wa_evlog-activity_name = 'create faktura'.
+*          wa_evlog-timestamp = it_et_delivery_header-fkdat && '000000'.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*
+**          EXIT.
+*        ENDIF.
+*      ENDLOOP.
+**      EXIT.
+*
+*    ENDIF.
+*  ENDLOOP.
+*ENDLOOP.
+
+*cl_demo_output=>display( it_evlog ).
+
+
+
+
+
+*
+**Create Commission
+*LOOP AT it_sales_orders.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create commission'.
+*
+*  LOOP AT it_et_delivery_item.
+*    IF it_sales_orders-sd_doc EQ it_et_delivery_item-paobjnr.
+*      LOOP AT it_et_delivery_header.
+*        IF it_et_delivery_header-vbeln EQ it_et_delivery_item-vbeln.
+*          wa_evlog-timestamp = it_et_delivery_header-kodat && it_et_delivery_header-kouhr.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*          EXIT.
+*        ENDIF.
+*      ENDLOOP.
+*      EXIT.
+*
+*    ENDIF.
+*  ENDLOOP.
+*ENDLOOP.
+*
+*
+**Create goods issue
+*LOOP AT it_sales_orders.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create goods issue'.
+*
+*  LOOP AT it_et_delivery_item.
+*    IF it_sales_orders-sd_doc EQ it_et_delivery_item-paobjnr.
+*      LOOP AT it_et_delivery_header.
+*        IF it_et_delivery_header-vbeln EQ it_et_delivery_item-vbeln.
+*          wa_evlog-timestamp = it_et_delivery_header-WADAT_IST && it_et_delivery_header-SPE_WAUHR_IST.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*          EXIT.
+*        ENDIF.
+*      ENDLOOP.
+*      EXIT.
+*
+*    ENDIF.
+*  ENDLOOP.
+*ENDLOOP.
+*
+*
+**Create faktura
+*LOOP AT it_sales_orders.
+*  CLEAR wa_evlog.
+*  wa_evlog-id = it_sales_orders-plant && '-' && it_sales_orders-sd_doc && '-' && it_sales_orders-itm_number.
+*  wa_evlog-activity_name = 'create faktura'.
+*
+*  LOOP AT it_et_delivery_item.
+*    IF it_sales_orders-sd_doc EQ it_et_delivery_item-paobjnr.
+*      LOOP AT it_et_delivery_header.
+*        IF it_et_delivery_header-vbeln EQ it_et_delivery_item-vbeln.
+*          wa_evlog-timestamp = it_et_delivery_header-FKDAT && '000000'.
+*          INSERT wa_evlog INTO TABLE it_evlog.
+*          EXIT.
+*        ENDIF.
+*      ENDLOOP.
+*      EXIT.
+*
+*    ENDIF.
+*  ENDLOOP.
+*ENDLOOP.

@@ -1,0 +1,73 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_PG_OLDENBURG_GET_G
+*&---------------------------------------------------------------------*
+
+"Deklaration der internen Tabellen und Arbeitsbereiche, welche für das Include benötigt werden
+DATA: ld_goodsmvt_header TYPE bapi2017_gm_head_02,
+      it_goodsmvt_items  TYPE STANDARD TABLE OF bapi2017_gm_item_show WITH HEADER LINE, "TABLES PARAM
+      wa_goodsmvt_items  LIKE LINE OF it_goodsmvt_items,
+      it_return_g        TYPE STANDARD TABLE OF bapiret2, "TABLES PARAM
+      wa_return_g        LIKE LINE OF it_return_g.
+
+
+
+
+
+LOOP AT go_it_goods into go_wa_goods.
+  CLEAR it_goodsmvt_items[].
+  CLEAR it_return_g[].
+  CLEAR ld_goodsmvt_header.
+  CALL FUNCTION 'BAPI_GOODSMVT_GETDETAIL'
+    EXPORTING
+      materialdocument = go_wa_goods-mblnr
+      matdocumentyear  = go_wa_goods-mjahr
+    IMPORTING
+      goodsmvt_header  = ld_goodsmvt_header
+    TABLES
+      goodsmvt_items   = it_goodsmvt_items
+      return           = it_return_g
+    .  "  BAPI_GOODSMVT_GETDETAIL
+
+
+  IF sy-subrc EQ 0.
+
+    CLEAR wa_goodsmvt_items.
+    READ TABLE it_goodsmvt_items INTO wa_goodsmvt_items INDEX 1.
+
+    "Hier werden die Informationen dem Arbeitsbereich hinzugefügt
+    CLEAR wa_evlog_gm.
+    wa_evlog_gm-id = wa_goodsmvt_items-po_number.
+    wa_evlog_gm-activity_name = 'goods delivery'.
+    wa_evlog_gm-timestamp = ld_goodsmvt_header-entry_date && ld_goodsmvt_header-entry_time.
+    wa_evlog_gm-mblnr = ld_goodsmvt_header-mat_doc.
+    wa_evlog_gm-g_material = wa_goodsmvt_items-material.
+    wa_evlog_gm-g_plant = wa_goodsmvt_items-plant.
+    wa_evlog_gm-g_stge_loc = wa_goodsmvt_items-stge_loc.
+    wa_evlog_gm-g_batch = wa_goodsmvt_items-batch.
+    wa_evlog_gm-g_move_type = wa_goodsmvt_items-move_type.
+    wa_evlog_gm-g_stck_type = wa_goodsmvt_items-stck_type.
+    wa_evlog_gm-g_vendor = wa_goodsmvt_items-vendor.
+    wa_evlog_gm-g_customer = wa_goodsmvt_items-customer.
+    wa_evlog_gm-g_entry_qnt = wa_goodsmvt_items-entry_qnt.
+    wa_evlog_gm-g_entry_uom = wa_goodsmvt_items-entry_uom.
+    wa_evlog_gm-g_shipping = wa_goodsmvt_items-shipping.
+    wa_evlog_gm-g_comp_ship = wa_goodsmvt_items-comp_ship.
+    wa_evlog_gm-g_gr_rcpt = wa_goodsmvt_items-gr_rcpt.
+    wa_evlog_gm-g_unload_pt = wa_goodsmvt_items-unload_pt.
+    wa_evlog_gm-g_costcenter = wa_goodsmvt_items-costcenter.
+    wa_evlog_gm-g_asset_no = wa_goodsmvt_items-asset_no.
+    wa_evlog_gm-g_sub_number = wa_goodsmvt_items-sub_number.
+    wa_evlog_gm-g_move_mat = wa_goodsmvt_items-move_mat.
+    wa_evlog_gm-g_move_plant = wa_goodsmvt_items-move_plant.
+    wa_evlog_gm-g_move_reas = wa_goodsmvt_items-move_reas.
+    wa_evlog_gm-g_acttype = wa_goodsmvt_items-acttype.
+    wa_evlog_gm-g_suppl_vend = wa_goodsmvt_items-suppl_vend.
+    wa_evlog_gm-g_func_area_long = wa_goodsmvt_items-func_area_long.
+
+    IF wa_evlog_gm-timestamp NE '00000000000000' AND wa_evlog_gm-id IS NOT INITIAL.
+      "Hier wird der Arbeitsbereich in die interne Tabelle für den Attributlog geschreieben
+      INSERT wa_evlog_gm INTO TABLE it_evlog_gm.
+    ENDIF.
+  ENDIF.
+
+ENDLOOP.

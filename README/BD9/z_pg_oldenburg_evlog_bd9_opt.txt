@@ -1,0 +1,371 @@
+*&---------------------------------------------------------------------*
+*& Report Z_PG_OLDENBURG_EVLOG_BD9
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT z_pg_oldenburg_evlog_bd9_opt.
+
+
+"Struktur für Attributelog für das Business Objekt delivery
+TYPES: BEGIN OF t_evlog_delivery,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+
+         type_of_delivery  TYPE lfart, "LFART
+         goods_recipient   TYPE kunwe, "KUNNR
+         wight             TYPE ntgew_15, "NTGEW
+         net_worth         TYPE netwr_ak, "NETWR
+         new_net_price     TYPE netpr,
+         old_net_price     TYPE netpr,
+         new_menge         TYPE bapiorders-req_qty,
+         old_menge         TYPE bapiorders-req_qty,
+         reason            TYPE ftext,
+         lnummer_change    TYPE vbfa-vbeln,
+       END OF t_evlog_delivery.
+
+"Struktur für Attributelog für das Business Objekt salesorders
+TYPES: BEGIN OF t_evlog_salesorder,
+         id(10)            TYPE c,
+         activity_name(50) TYPE c,
+         timestamp(14)     TYPE c,
+
+         material          TYPE matnr18, "MATERIAL
+         doctype           TYPE auart, "DOC_TYPE
+         purch_no          TYPE bstnk, "Kundenreferenznummer PURCH_NO
+         client            TYPE kunag, "SOLD_TO
+         net_price         TYPE netpr, "NET_PRICE
+         reason            TYPE ftext,
+         lnummer_change    TYPE vbfa-vbeln,
+         new_net_price     TYPE netpr,
+         old_net_price     TYPE netpr,
+         new_menge         TYPE bapiorders-req_qty,
+         old_menge         TYPE bapiorders-req_qty,
+       END OF t_evlog_salesorder.
+
+
+
+
+
+"Hier werden interne Tabellen und Arbeitsbereiche für das Programm erstellt
+DATA:
+  ld_return           TYPE bapireturn,
+  it_sales_orders     TYPE STANDARD TABLE OF bapiorders WITH HEADER LINE, "TABLES PARAM
+  wa_sales_orders     LIKE LINE OF it_sales_orders,
+  ld_customern        TYPE kna1-kunnr,
+  it_salesordern      TYPE STANDARD TABLE OF bapiorders-sd_doc WITH HEADER LINE,
+  ld_et_cdred_str     TYPE cdred_str_tab,
+  it_editpos 	        TYPE STANDARD TABLE OF cdred WITH HEADER LINE, "TABLES PARAM
+  wa_editpos 	        LIKE LINE OF it_editpos,
+  it_editpos_delivery TYPE STANDARD TABLE OF cdred WITH HEADER LINE,
+  it_editpos_faktura  TYPE STANDARD TABLE OF cdred WITH HEADER LINE,
+  new_timestamp(14)   TYPE c,
+  it_evlog_delivery   TYPE STANDARD TABLE OF t_evlog_delivery INITIAL SIZE 0,
+  wa_evlog_delivery   TYPE t_evlog_delivery,
+  it_evlog_salesorder TYPE STANDARD TABLE OF t_evlog_salesorder INITIAL SIZE 0,
+  wa_evlog_salesorder TYPE t_evlog_salesorder.
+
+
+
+
+
+START-OF-SELECTION.
+
+
+  "Aufruf des Includes z_pg_oldenburg_get_change_opt
+  INCLUDE z_pg_oldenburg_get_change_opt.
+
+  "Aufruf des Includes z_pg_oldenburg_get_s_opt
+  INCLUDE z_pg_oldenburg_get_s_opt.
+
+  "Aufruf des z_pg_oldenburg_get_d_opt
+  INCLUDE z_pg_oldenburg_get_d_opt.
+
+
+
+
+  DATA test TYPE string.
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send   = it_evlog_salesorder
+      process_name    = 'BD9'
+      is_event_log    = 'N'
+      business_object = 'Sales_order'
+    IMPORTING
+      message         = test.
+
+  WRITE:/ test.
+
+  CALL FUNCTION 'Z_PG_INGESTION_API'
+    EXPORTING
+      table_to_send   = it_evlog_delivery
+      process_name    = 'BD9'
+      is_event_log    = 'N'
+      business_object = 'Delivery'
+    IMPORTING
+      message         = test.
+
+  WRITE:/ test.
+
+
+
+************************************************
+************ Prepare csv file*******************
+************************************************
+*
+*DATA: lv_string type string,
+*      temp_price type string,
+*      temp_wight type string,
+*      temp_worth type string,
+*      temp_new_price type string,
+*      temp_old_price type string,
+*      temp_new_menge type string,
+*      temp_old_menge type string,
+*      temp_lnummer type string,
+*      lv_xstring type xstring.
+*
+*lv_string = 'ID,ACTIVITY_NAME,TIMESTAMP,MATERIAL,DOCTYPE,PURCH_NO,CLIENT,NET_PRICE,TYPE_OF_DELIVERY,GOODS_RECIPIENT,WIGHT,NET_WORTH,NEW_NET_PRICE,OLD_NET_PRICE,NEW_MENGE,OLD_MENGE,REASON,LNUMMER_CHANGE '.
+*
+*
+*LOOP AT it_evlog ASSIGNING FIELD-SYMBOL(<r>).
+*
+*  temp_price = <r>-net_price.
+*  temp_wight = <r>-wight.
+*  temp_worth = <r>-net_worth.
+*  temp_new_price = <r>-new_net_price.
+*  temp_old_price = <r>-old_net_price.
+*  temp_new_menge = <r>-new_menge.
+*  temp_old_menge = <r>-old_menge.
+*  temp_lnummer = <r>-lnummer_change.
+*
+*  CONCATENATE
+*  lv_string
+*  CL_ABAP_CHAR_UTILITIES=>NEWLINE
+*  <r>-id ',' <r>-activity_name ',' <r>-timestamp ',' <r>-material ',' <r>-doctype ',' <r>-purch_no ',' <r>-client ',' temp_price
+*   ',' <r>-type_of_delivery ',' <r>-goods_recipient ',' temp_wight ',' temp_worth ',' temp_new_price ',' temp_old_price ','
+*    temp_new_menge ',' temp_old_menge ',' <r>-reason ',' temp_lnummer
+*   INTO lv_string.
+*
+*ENDLOOP.
+*
+*CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+*EXPORTING
+*text = lv_string " variable type string
+*IMPORTING
+*buffer = lv_xstring. " variable type xstring
+*
+*
+*
+*************************************************************
+*********************** Prepare schema **********************
+*************************************************************
+*
+*DATA columns(5000) TYPE c.
+*columns = ' ['
+* &   '{"name": "ID", "type": ["null", "string"]}, '
+* &   '{"name": "ACTIVITY_NAME", "type": ["null", "string"]}, '
+* &   '{"name": "TIMESTAMP", "type": {'
+* &   ' "type": "long" ,'
+* &   ' "logicalType" : "timestamp-millis" '
+* &   '}}, ' .
+*CONCATENATE columns
+*     '{"name": "MATERIAL", "type": ["null", "string"]}, '
+* &   '{"name": "DOCTYPE", "type": ["null", "string"]}, '
+* &   '{"name": "PURCH_NO", "type": ["null", "string"]}, '
+* &   '{"name": "CLIENT", "type": ["null", "string"]}, '  INTO COLUMNS.
+*CONCATENATE columns
+*     '{"name": "NET_PRICE", "type": ["null", "string"]}, '
+* &   '{"name": "TYPE_OF_DELIVERY", "type": ["null", "string"]}, '
+* &   '{"name": "GOODS_RECIPIENT", "type": ["null", "string"]}, '
+* &   '{"name": "WIGHT", "type": ["null", "string"]}, ' INTO columns.
+*CONCATENATE columns
+*    '{"name": "NET_WORTH", "type": ["null", "string"]}, '
+* &  '{"name": "NEW_NET_PRICE", "type": ["null", "string"]}, '
+* &  '{"name": "OLD_NET_PRICE", "type": ["null", "string"]}, '
+* &  '{"name": "NEW_MENGE", "type": ["null", "string"]}, ' INTO columns.
+*CONCATENATE columns
+*    '{"name": "OLD_MENGE", "type": ["null", "string"]}, '
+* &  '{"name": "REASON", "type": ["null", "string"]}, '
+* &  '{"name": "LNUMMER_CHANGE", "type": ["null", "string"]} '
+* &   ']' INTO columns.
+*
+*DATA schema TYPE string.
+*CONCATENATE
+*'{"type": "record", "delimiter": ",", "name": "EventLog", "fields": '
+*columns
+*'} ' INTO schema.
+*
+** Prepare header and token
+*
+*
+*DATA token_value TYPE string.
+*
+*CONCATENATE
+*' YjMzMGIyYjktYTYzZS00MWM5LThhYTItM2Q3YjFkYjM1MjE1O'
+*'mQyODllNWM5LTFkMDctNDRjZi1hZDM4LWRmYzY3NzIyOWRmNjo'
+*'wYTYxYzljZTBlZjY0MWEyYjQ5MDRhMTQ5YmQ3NGVlMDo2OGJQR'
+*'XNYak1TcE9LdmZmTXdYTTBJYmRjUWE4R2NmRE1uTGZheXBnRzZ'
+*'ZbGsyNHVwSXlzR1FDajZzT3ltOUpk'
+*INTO TOKEN_VALUE.
+*
+*CONCATENATE
+*'Bearer '
+*token_value
+*
+*INTO token_value.
+*
+*
+*
+*
+***********************************************
+*************** HTTP Request*******************
+***********************************************
+*
+*** Get a client in lo_client and set method to POST
+*cl_http_client=>create_by_url(
+*  EXPORTING
+*    url                = 'https://spi-etl-ingestion.eu-prod-cloud-os-eu.suite-saas-prod.signav.io/ingestion/data'
+*  IMPORTING
+*    client             = DATA(lo_client)
+*  EXCEPTIONS
+*    argument_not_found = 1
+*    plugin_not_active  = 2
+*    internal_error     = 3
+*    OTHERS             = 4 ).
+*
+*lo_client->request->set_method( if_http_request=>co_request_method_post ).
+*
+*
+*
+*** prepare header fields
+** first the authorization
+*
+*
+*lo_client->request->set_header_field(
+*      EXPORTING
+*        name  = 'Authorization'    " Name of the header field
+*        value = token_value
+*    ).
+*
+*lo_client->request->set_header_field( name  = 'Content-Type' value = 'multipart/form-data' ). "#EC NOTEXT
+*lo_client->request->set_header_field( name  = 'Accept' value = 'application/json' ).
+*
+*
+*
+*** Adding values for schema, primaryKeys and delimiter parts to request
+***
+*
+*** Steps are as follows:
+*** 1. add a request part
+*** 2. set part header field of content_disposition to name of the part
+*** 3. set the form field of that name to the value we need.
+*
+*DATA:
+*lo_request_part type ref to if_http_entity,
+*lv_content_disposition type string.
+*
+*** Setting schema
+*lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+*
+*CALL METHOD lo_request_part->SET_header_FIELD
+*EXPORTING
+*NAME ='content-disposition'
+*VALUE ='form-data;name="schema"'.
+*
+*lo_client->request->set_form_field( name = 'schema' value = schema ).
+*
+*
+*** Setting pks
+*lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+*
+*CALL METHOD lo_request_part->SET_header_FIELD
+*EXPORTING
+*NAME ='content-disposition'
+*VALUE ='form-data;name="primaryKeys"'.
+*
+*data lv_xstring_pks type xstring.
+*
+*
+*CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+*EXPORTING
+*text = 'ID,ACTIVITY_NAME'" variable type string
+*IMPORTING
+*buffer = lv_xstring_pks.
+*
+*CALL METHOD lo_request_part->set_data
+*EXPORTING
+*data = lv_xstring_pks
+*offset = 0.
+*
+*
+***************************************************************
+********************************File***************************
+***************************************************************
+*
+*lo_request_part = lo_CLIENT->REQUEST->IF_HTTP_ENTITY~ADD_MULTIPART( ).
+*
+*CALL METHOD lo_request_part->SET_header_FIELD
+*EXPORTING
+*NAME ='content-disposition'
+*VALUE ='form-data;name="file1";filename="evlog.csv"'.
+*
+*CALL METHOD LO_CLIENT->REQUEST->IF_HTTP_ENTITY~SET_FORMFIELD_ENCODING
+*EXPORTING
+*FORMFIELD_ENCODING = CL_HTTP_REQUEST=>IF_HTTP_ENTITY~CO_ENCODING_RAW .
+*
+*DATA test_string type string.
+*
+*
+*
+*lo_request_part->set_content_type( 'text/csv' ).
+*
+*CALL METHOD lo_request_part->set_data
+*EXPORTING
+*data = lv_xstring
+*offset = 0.
+*
+*
+**lo_client->request->set_data( test_xstring ).
+**lo_client->request->set_data( l_csv_xstr ).
+**lo_request_part->set_data( data = l_csv_xstr ).
+**lo_request_part->set_cdata( data = lv_string_FIN ).
+*
+*
+********************************************************************************************
+*
+*" Request senden
+*lo_client->send(
+*  EXCEPTIONS
+*    http_communication_failure = 1
+*    http_invalid_state         = 2
+*    http_processing_failed     = 3
+*    OTHERS                     = 4 ).
+*
+** Ergebnis aufnehmen
+*lo_client->receive(
+*   EXCEPTIONS
+*   http_communication_failure = 1
+*   http_invalid_state         = 2
+*   http_processing_failed     = 3
+*   OTHERS                     = 4 ).
+*
+*
+*
+*" Daten abholen
+*DATA(ld_stream) = lo_client->response->get_cdata( ).
+*write ld_stream.
+*
+*DATA: lv_http_status TYPE i.
+*DATA: lv_status_text TYPE string.
+*
+** HTTP Return Code holen
+*lo_client->response->get_status( IMPORTING
+*                                  code   = lv_http_status
+*                                  reason = lv_status_text ).
+*
+*WRITE: / 'HTTP_STATUS_CODE:', lv_http_status.
+*WRITE: / 'STATUS_TEXT:', lv_status_text.
+*
+*
+** HTTP Connection schließen
+*      lo_client->close( ).
